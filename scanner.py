@@ -59,6 +59,41 @@ class Scanner:
                     
             print("")
 
+    def param_overriding_scan(self, method, url, headers, body, param, original_value, original_response_body, original_status, proxies=None):
+        if not(param != self.specific_param and self.scan_specific_param):
+            print("")
+            print_msg("info", f"{bold}Testing parameter {cyan}{param}{reset} {bold}for reflections on parameters overriding{reset}")
+            payloads = ["%23", "%3f", "%26", "%2f", "%3d"]
+            decoded_payloads = ["#", "?", "&", "/", "="]
+            
+            for payload, decoded_payload in zip(payloads, decoded_payloads):
+                modified_value = original_value + payload
+                modified_params = {param: modified_value}
+                
+                if method == 'GET':
+                    url_parts = urllib.parse.urlsplit(url)
+                    query_params = urllib.parse.parse_qs(url_parts.query)
+                    query_params[param] = modified_value
+                    new_query_string = urllib.parse.urlencode(query_params, doseq=True)
+                    new_query_string = urllib.parse.unquote(new_query_string)
+                    new_url = urllib.parse.urlunsplit((url_parts.scheme, url_parts.netloc, url_parts.path, new_query_string, url_parts.fragment))
+                    _, response_body = self.send_modified_request(method, new_url, headers, body, param, modified_value, original_response_body, original_status, proxies)
+                elif method == 'POST':
+                    post_params = urllib.parse.parse_qs(body)
+                    post_params[param] = modified_value
+                    new_body = urllib.parse.urlencode(post_params, doseq=True)
+                    new_body = urllib.parse.unquote(new_body)
+                    _, response_body = self.send_modified_request(method, url, headers, new_body, param, modified_value, original_response_body, original_status, proxies)
+                
+                if str(original_value + decoded_payload) in response_body.decode('utf-8', errors='replace'):
+                    print_msg("vuln", f"High confidence finding of server-side parameter pollution on parameter {bold}{red}{param}{reset} with payload {bold}{red}{payload}{reset} found URL-decoded in response body (value reflected to {decoded_payload})")
+                    print("")
+                    if self.exit_early:
+                        print_msg("info", "Exiting the program...")
+                        exit()
+                        
+            print("")
+
     def directory_node_scan(self, method, url, headers, body, original_response_body, original_status, proxies=None):
         responses = []
         
@@ -146,6 +181,48 @@ class Scanner:
                             print_msg("info", "Exiting the program...")
                             exit()
 
+            print("")
+
+    def existing_param_override_scan(self, method, url, headers, body, param, original_value, original_response_body, original_status, proxies=None):
+        if not(param != self.specific_param and self.scan_specific_param):
+            print("")
+            print_msg("info", f"{bold}Testing parameter {green}{param}{reset} {bold}by overriding existing parameters{reset}")
+            random_value = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+            payload = f"%26{param}={random_value}"
+            modified_value = original_value + payload
+
+            if method == 'GET':
+                url_parts = urllib.parse.urlsplit(url)
+                query_params = urllib.parse.parse_qs(url_parts.query)
+                query_params[param] = modified_value
+                new_query_string = urllib.parse.urlencode(query_params, doseq=True)
+                new_query_string = urllib.parse.unquote(new_query_string)
+                new_url = urllib.parse.urlunsplit((url_parts.scheme, url_parts.netloc, url_parts.path, new_query_string, url_parts.fragment))
+                status, response_body = self.send_modified_request(method, new_url, headers, body, param, modified_value, original_response_body, original_status, proxies)
+            elif method == 'POST':
+                post_params = urllib.parse.parse_qs(body)
+                post_params[param] = modified_value
+                new_body = urllib.parse.urlencode(post_params, doseq=True)
+                new_body = urllib.parse.unquote(new_body)
+                status, response_body = self.send_modified_request(method, url, headers, new_body, param, modified_value, original_response_body, original_status, proxies)
+            
+            response_text = response_body.decode('utf-8', errors='replace')
+            if (random_value in response_text and original_value in response_text and str(param + "=") not in response_text) or status != original_status or (len(response_body) - (len(payload))) != len(original_response_body):
+                print_msg("vuln", f"Potential vulnerable behaviour detected, backend might be {bold}ASP.NET{reset}. This detection is prone to false-positives.")
+                if self.exit_early:
+                    print_msg("info", "Exiting the program...")
+                    exit()
+            elif random_value in response_text and str(param + "=") not in response_text:
+                print_msg("vuln", f"Potential vulnerable behaviour detected, backend might be {bold}PHP{reset}.")
+                if self.exit_early:
+                    print_msg("info", "Exiting the program...")
+                    exit()
+            elif original_value in response_text and str(param + "=") not in response_text:
+                print_msg("vuln", f"Potential vulnerable behaviour detected, backend might be {bold}Node.js{reset} or {bold}Express{reset}.")
+                if self.exit_early:
+                    print_msg("info", "Exiting the program...")
+                    exit()
+                    
             print("")
 
     def traversal_depth_scan(self, method, url, headers, body, param, original_value, original_response_body, original_status, proxies=None):
